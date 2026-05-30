@@ -7,24 +7,21 @@ export default async function PredictionsPage() {
   const session = await auth();
   if (!session?.user?.id) redirect("/api/auth/signin");
 
-  const matches = await prisma.match.findMany({
-    include: { homeTeam: true, awayTeam: true },
-    orderBy: [{ stage: "asc" }, { order: "asc" }, { matchDate: "asc" }],
-  });
+  const [matches, predictions] = await Promise.all([
+    prisma.match.findMany({
+      include: { homeTeam: true, awayTeam: true },
+      orderBy: [{ order: "asc" }, { matchDate: "asc" }],
+    }),
+    prisma.prediction.findMany({ where: { userId: session.user.id } }),
+  ]);
 
-  const predictions = await prisma.prediction.findMany({
-    where: { userId: session.user.id },
-  });
-
-  const predictionsMap: Record<string, { homeScore: number; awayScore: number }> = {};
-  for (const p of predictions) {
-    predictionsMap[p.matchId] = { homeScore: p.homeScore, awayScore: p.awayScore };
-  }
+  const predMap: Record<string, { homeScore: number; awayScore: number }> = {};
+  for (const p of predictions) predMap[p.matchId] = { homeScore: p.homeScore, awayScore: p.awayScore };
 
   return (
     <PredictionsClient
       matches={JSON.parse(JSON.stringify(matches))}
-      initialPredictions={predictionsMap}
+      initialPredictions={predMap}
     />
   );
 }

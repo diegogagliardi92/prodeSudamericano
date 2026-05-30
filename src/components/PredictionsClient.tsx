@@ -1,333 +1,173 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Check, Clock, Lock, ChevronDown } from "lucide-react";
-import { formatMatchDate, stageLabel } from "@/lib/utils";
+import { Check, Clock, Lock } from "lucide-react";
+import { formatDate } from "@/lib/utils";
 
-type Team = { id: string; name: string; nameEs: string; flag: string; group: string };
+type Team  = { id:string; nameEs:string; flag:string; group:string };
 type Match = {
-  id: string;
-  homeTeam: Team;
-  awayTeam: Team;
-  matchDate: string;
-  stage: string;
-  group: string | null;
-  homeScore: number | null;
-  awayScore: number | null;
-  venue: string | null;
+  id:string; homeTeam:Team; awayTeam:Team;
+  matchDate:string; stage:string; group:string|null;
+  homeScore:number|null; awayScore:number|null; venue:string|null;
 };
+type PredMap = Record<string, { homeScore:number; awayScore:number }>;
 
-interface Props {
-  matches: Match[];
-  initialPredictions: Record<string, { homeScore: number; awayScore: number }>;
-}
+const GROUPS = ["A","B","C","D","E","F","G","H","I","J","K","L"];
 
-const STAGE_ORDER = ["GROUP", "ROUND_OF_16", "QUARTER_FINAL", "SEMI_FINAL", "THIRD_PLACE", "FINAL"];
+export function PredictionsClient({ matches, initialPredictions }:
+  { matches: Match[]; initialPredictions: PredMap }) {
 
-export function PredictionsClient({ matches, initialPredictions }: Props) {
-  const [predictions, setPredictions] = useState(initialPredictions);
-  const [saving, setSaving] = useState<string | null>(null);
-  const [saved, setSaved] = useState<Record<string, boolean>>({});
-  const [activeGroup, setActiveGroup] = useState<string>("A");
+  const [preds, setPreds]   = useState<PredMap>(initialPredictions);
+  const [saving, setSaving] = useState<string|null>(null);
+  const [saved,  setSaved]  = useState<Record<string,boolean>>({});
+  const [tab,    setTab]    = useState("A");
+  const saveTimer = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
-  const groupMatches = matches.filter((m) => m.stage === "GROUP");
-  const knockoutMatches = matches.filter((m) => m.stage !== "GROUP");
+  const groupMatches = matches.filter(m => m.stage === "GROUP");
+  const groups = GROUPS.filter(g => groupMatches.some(m => m.group === g));
 
-  const groups = [...new Set(groupMatches.map((m) => m.group).filter(Boolean))].sort() as string[];
+  const save = useCallback(async (matchId: string, home: number, away: number) => {
+    setSaving(matchId);
+    try {
+      await fetch("/api/predictions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ matchId, homeScore: home, awayScore: away }),
+      });
+      setSaved(prev => ({ ...prev, [matchId]: true }));
+      setTimeout(() => setSaved(prev => ({ ...prev, [matchId]: false })), 1800);
+    } finally {
+      setSaving(null);
+    }
+  }, []);
 
-  const savePrediction = useCallback(
-    async (matchId: string, homeScore: number, awayScore: number) => {
-      if (isNaN(homeScore) || isNaN(awayScore)) return;
-      setSaving(matchId);
-      try {
-        await fetch("/api/predictions", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ matchId, homeScore, awayScore }),
-        });
-        setSaved((prev) => ({ ...prev, [matchId]: true }));
-        setTimeout(() => setSaved((prev) => ({ ...prev, [matchId]: false })), 2000);
-      } finally {
-        setSaving(null);
-      }
-    },
-    []
-  );
-
-  const handleScore = (matchId: string, side: "home" | "away", value: string) => {
-    const num = parseInt(value, 10);
-    if (value === "" || (!isNaN(num) && num >= 0 && num <= 20)) {
-      const current = predictions[matchId] ?? { homeScore: 0, awayScore: 0 };
-      const updated = {
-        ...current,
-        [side === "home" ? "homeScore" : "awayScore"]: isNaN(num) ? 0 : num,
-      };
-      setPredictions((prev) => ({ ...prev, [matchId]: updated }));
-      if (!isNaN(num)) {
-        const home = side === "home" ? num : (updated.homeScore ?? 0);
-        const away = side === "away" ? num : (updated.awayScore ?? 0);
-        savePrediction(matchId, home, away);
-      }
+  const onChange = (matchId: string, side: "home"|"away", raw: string) => {
+    const n = parseInt(raw, 10);
+    if (raw !== "" && (isNaN(n) || n < 0 || n > 20)) return;
+    const curr = preds[matchId] ?? { homeScore:0, awayScore:0 };
+    const next  = { ...curr, [side==="home" ? "homeScore":"awayScore"]: isNaN(n) ? 0 : n };
+    setPreds(prev => ({ ...prev, [matchId]: next }));
+    clearTimeout(saveTimer.current[matchId]);
+    if (!isNaN(n)) {
+      saveTimer.current[matchId] = setTimeout(() =>
+        save(matchId, next.homeScore, next.awayScore), 600);
     }
   };
 
-  const isLocked = (match: Match) => new Date(match.matchDate) <= new Date();
+  const locked = (m: Match) => new Date(m.matchDate) <= new Date();
 
   return (
-    <div className="max-w-3xl mx-auto px-4 py-8">
+    <div className="max-w-2xl mx-auto px-4 py-8">
+
       {/* Header */}
-      <motion.div
-        initial={{ opacity: 0, y: -20 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="mb-8"
-      >
-        <h1 className="text-3xl font-black text-white mb-1">
-          Mis <span className="gradient-text">Predicciones</span>
+      <motion.div initial={{ opacity:0, y:-16 }} animate={{ opacity:1, y:0 }} className="mb-7">
+        <h1 className="text-3xl font-black">
+          Mis <span className="grad-gold">Pronósticos</span>
         </h1>
-        <p className="text-white/40 text-sm">
-          Exacto = 3pts · Resultado correcto = 1pt · Guardado automático
+        <p className="text-white/35 text-sm mt-1">
+          Exacto = <span className="text-amber-400 font-semibold">3pts</span> &nbsp;·&nbsp;
+          Resultado = <span className="text-green-400 font-semibold">1pt</span> &nbsp;·&nbsp;
+          Guardado automático
         </p>
       </motion.div>
 
-      {/* GROUP STAGE */}
-      <Section title="Fase de Grupos">
-        {/* Group tabs */}
-        <div className="flex flex-wrap gap-2 mb-6">
-          {groups.map((g) => (
-            <motion.button
-              key={g}
-              whileTap={{ scale: 0.95 }}
-              onClick={() => setActiveGroup(g)}
-              className={`px-4 py-1.5 rounded-xl text-sm font-semibold transition-all ${
-                activeGroup === g
-                  ? "bg-amber-500 text-black shadow-lg shadow-amber-500/25"
-                  : "glass text-white/50 hover:text-white"
-              }`}
-            >
-              Grupo {g}
-            </motion.button>
-          ))}
-        </div>
-
-        <AnimatePresence mode="wait">
-          <motion.div
-            key={activeGroup}
-            initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: -20 }}
-            transition={{ duration: 0.2 }}
-            className="space-y-3"
-          >
-            {groupMatches
-              .filter((m) => m.group === activeGroup)
-              .map((match, i) => (
-                <MatchCard
-                  key={match.id}
-                  match={match}
-                  prediction={predictions[match.id]}
-                  locked={isLocked(match)}
-                  saving={saving === match.id}
-                  saved={saved[match.id]}
-                  onScore={handleScore}
-                  index={i}
-                />
-              ))}
-          </motion.div>
-        </AnimatePresence>
-      </Section>
-
-      {/* KNOCKOUT */}
-      {knockoutMatches.length > 0 && (
-        <Section title="Fase Eliminatoria" className="mt-8">
-          <div className="space-y-3">
-            {STAGE_ORDER.filter((s) => s !== "GROUP").map((stage) => {
-              const stageGames = knockoutMatches.filter((m) => m.stage === stage);
-              if (!stageGames.length) return null;
-              return (
-                <div key={stage}>
-                  <p className="text-xs font-semibold text-white/30 uppercase tracking-widest mb-3">
-                    {stageLabel(stage)}
-                  </p>
-                  {stageGames.map((match, i) => (
-                    <MatchCard
-                      key={match.id}
-                      match={match}
-                      prediction={predictions[match.id]}
-                      locked={isLocked(match)}
-                      saving={saving === match.id}
-                      saved={saved[match.id]}
-                      onScore={handleScore}
-                      index={i}
-                      multiplier={2}
-                    />
-                  ))}
-                </div>
-              );
-            })}
-          </div>
-        </Section>
-      )}
-    </div>
-  );
-}
-
-function Section({
-  title,
-  children,
-  className,
-}: {
-  title: string;
-  children: React.ReactNode;
-  className?: string;
-}) {
-  return (
-    <div className={className}>
-      <div className="flex items-center gap-3 mb-4">
-        <span className="text-xs font-bold uppercase tracking-[0.15em] text-white/30">{title}</span>
-        <div className="flex-1 h-px bg-white/[0.06]" />
+      {/* Group tabs */}
+      <div className="flex flex-wrap gap-1.5 mb-5">
+        {groups.map(g => (
+          <motion.button key={g} whileTap={{ scale:0.93 }} onClick={() => setTab(g)}
+            className={`px-4 py-1.5 rounded-xl text-sm font-bold transition-all
+              ${tab===g ? "bg-amber-500 text-black shadow-lg shadow-amber-500/25" : "glass text-white/40 hover:text-white"}`}>
+            Grupo {g}
+          </motion.button>
+        ))}
       </div>
-      {children}
-    </div>
-  );
-}
 
-function MatchCard({
-  match,
-  prediction,
-  locked,
-  saving,
-  saved,
-  onScore,
-  index,
-  multiplier = 1,
-}: {
-  match: Match;
-  prediction?: { homeScore: number; awayScore: number };
-  locked: boolean;
-  saving: boolean;
-  saved: boolean;
-  onScore: (id: string, side: "home" | "away", val: string) => void;
-  index: number;
-  multiplier?: number;
-}) {
-  const hasPrediction = prediction !== undefined;
-  const actualPlayed = match.homeScore !== null && match.awayScore !== null;
-
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 16 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ delay: index * 0.05, duration: 0.3 }}
-      className={`glass rounded-2xl p-4 transition-all glass-hover ${
-        hasPrediction ? "border-white/[0.1]" : ""
-      } ${locked ? "opacity-70" : ""}`}
-    >
-      <div className="flex items-center gap-3">
-        {/* Home team */}
-        <div className="flex-1 flex items-center gap-2 min-w-0">
-          <span className="text-2xl">{match.homeTeam.flag}</span>
-          <span className="font-semibold text-white text-sm truncate hidden sm:block">
-            {match.homeTeam.nameEs}
-          </span>
-          <span className="font-semibold text-white text-xs truncate sm:hidden">
-            {match.homeTeam.flag}
-          </span>
-        </div>
-
-        {/* Scores */}
-        <div className="flex items-center gap-2 flex-shrink-0">
-          {locked ? (
-            <div className="flex items-center gap-2">
-              {hasPrediction ? (
-                <div className="flex items-center gap-1.5 px-3 py-1 rounded-xl bg-white/[0.06] text-white/50 text-sm font-bold">
-                  <Lock size={10} />
-                  {prediction.homeScore} – {prediction.awayScore}
-                </div>
-              ) : (
-                <div className="flex items-center gap-1 px-3 py-1 rounded-xl bg-white/[0.04] text-white/20 text-xs">
-                  <Lock size={10} />
-                  Sin predicción
-                </div>
-              )}
-            </div>
-          ) : (
-            <>
-              <input
-                type="number"
-                min={0}
-                max={20}
-                value={prediction?.homeScore ?? ""}
-                placeholder="–"
-                onChange={(e) => onScore(match.id, "home", e.target.value)}
-                className="score-input"
-                disabled={locked}
-              />
-              <span className="text-white/20 font-bold text-lg">:</span>
-              <input
-                type="number"
-                min={0}
-                max={20}
-                value={prediction?.awayScore ?? ""}
-                placeholder="–"
-                onChange={(e) => onScore(match.id, "away", e.target.value)}
-                className="score-input"
-                disabled={locked}
-              />
-            </>
-          )}
-
-          {/* Save indicator */}
-          <AnimatePresence>
-            {saving && (
-              <motion.div
-                initial={{ opacity: 0, scale: 0.5 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.5 }}
-                className="w-5 h-5 rounded-full border-2 border-amber-400 border-t-transparent animate-spin"
-              />
-            )}
-            {saved && (
-              <motion.div
-                initial={{ opacity: 0, scale: 0.5 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.5 }}
+      {/* Match cards */}
+      <AnimatePresence mode="wait">
+        <motion.div key={tab}
+          initial={{ opacity:0, x:24 }} animate={{ opacity:1, x:0 }} exit={{ opacity:0, x:-24 }}
+          transition={{ duration:0.18 }}
+          className="space-y-2.5"
+        >
+          {groupMatches.filter(m => m.group === tab).map((m, i) => {
+            const p = preds[m.id];
+            const lck = locked(m);
+            return (
+              <motion.div key={m.id}
+                initial={{ opacity:0, y:14 }} animate={{ opacity:1, y:0 }}
+                transition={{ delay: i*0.04 }}
+                className={`glass rounded-2xl p-4 ${p ? "border-white/[0.10]" : ""} ${lck ? "opacity-60" : ""}`}
               >
-                <Check size={16} className="text-green-400" />
+                <div className="flex items-center gap-2">
+                  {/* Home */}
+                  <div className="flex-1 flex items-center gap-2 min-w-0">
+                    <span className="text-[1.6rem] leading-none">{m.homeTeam.flag}</span>
+                    <span className="font-semibold text-sm truncate hidden xs:block">{m.homeTeam.nameEs}</span>
+                  </div>
+
+                  {/* Score inputs / locked display */}
+                  <div className="flex items-center gap-2 shrink-0">
+                    {lck ? (
+                      <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl glass text-white/40 text-sm font-bold">
+                        <Lock size={11} />
+                        {p ? `${p.homeScore} – ${p.awayScore}` : "–"}
+                      </div>
+                    ) : (
+                      <>
+                        <input type="number" min={0} max={20} placeholder="–"
+                          value={p?.homeScore ?? ""}
+                          onChange={e => onChange(m.id, "home", e.target.value)}
+                          className="score-input" />
+                        <span className="text-white/20 font-bold text-xl select-none">:</span>
+                        <input type="number" min={0} max={20} placeholder="–"
+                          value={p?.awayScore ?? ""}
+                          onChange={e => onChange(m.id, "away", e.target.value)}
+                          className="score-input" />
+                      </>
+                    )}
+
+                    {/* Status */}
+                    <div className="w-5 flex items-center justify-center">
+                      <AnimatePresence>
+                        {saving===m.id && (
+                          <motion.div key="spin"
+                            initial={{ opacity:0 }} animate={{ opacity:1 }} exit={{ opacity:0 }}
+                            className="w-4 h-4 rounded-full border-2 border-amber-400 border-t-transparent animate-spin" />
+                        )}
+                        {saved[m.id] && (
+                          <motion.div key="check"
+                            initial={{ scale:0, opacity:0 }} animate={{ scale:1, opacity:1 }} exit={{ opacity:0 }}>
+                            <Check size={15} className="text-green-400" />
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </div>
+                  </div>
+
+                  {/* Away */}
+                  <div className="flex-1 flex items-center justify-end gap-2 min-w-0">
+                    <span className="font-semibold text-sm truncate hidden xs:block">{m.awayTeam.nameEs}</span>
+                    <span className="text-[1.6rem] leading-none">{m.awayTeam.flag}</span>
+                  </div>
+                </div>
+
+                {/* Footer */}
+                <div className="flex items-center gap-1.5 mt-2.5 pt-2.5 border-t border-white/[0.04] text-[11px] text-white/25">
+                  <Clock size={10} />
+                  {formatDate(m.matchDate)}
+                  {m.venue && <span>· {m.venue}</span>}
+                  {m.homeScore !== null && (
+                    <span className="ml-auto text-white/20">
+                      Real: {m.homeScore}–{m.awayScore}
+                    </span>
+                  )}
+                </div>
               </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
-
-        {/* Away team */}
-        <div className="flex-1 flex items-center justify-end gap-2 min-w-0">
-          <span className="font-semibold text-white text-sm truncate hidden sm:block">
-            {match.awayTeam.nameEs}
-          </span>
-          <span className="text-2xl">{match.awayTeam.flag}</span>
-        </div>
-      </div>
-
-      {/* Footer */}
-      <div className="flex items-center justify-between mt-2.5 pt-2.5 border-t border-white/[0.04]">
-        <div className="flex items-center gap-1.5 text-xs text-white/25">
-          <Clock size={11} />
-          {formatMatchDate(new Date(match.matchDate))}
-          {match.venue && <span>· {match.venue}</span>}
-        </div>
-        <div className="flex items-center gap-2">
-          {multiplier > 1 && (
-            <span className="text-xs px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400 font-semibold">
-              ×{multiplier}
-            </span>
-          )}
-          {actualPlayed && (
-            <span className="text-xs text-white/30">
-              Real: {match.homeScore} – {match.awayScore}
-            </span>
-          )}
-        </div>
-      </div>
-    </motion.div>
+            );
+          })}
+        </motion.div>
+      </AnimatePresence>
+    </div>
   );
 }

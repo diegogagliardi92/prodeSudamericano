@@ -1,40 +1,20 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Geist } from "next/font/google";
 import "./globals.css";
-import { Navbar } from "@/components/Navbar";
 import { Providers } from "@/components/Providers";
+import { Navbar } from "@/components/Navbar";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
+const geist = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Prode Mundial 2026 🏆",
-  description: "Predecí los resultados del Mundial 2026 y competí con tus amigos",
-  openGraph: {
-    title: "Prode Mundial 2026 🏆",
-    description: "Predecí los resultados del Mundial 2026",
-    type: "website",
-  },
+  title: "Prode Mundial 2026 ⚽",
+  description: "Predecí los partidos del Mundial 2026 y competí con tus amigos",
 };
 
-export default function RootLayout({
-  children,
-}: Readonly<{
-  children: React.ReactNode;
-}>) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html
-      lang="es"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased dark`}
-    >
-      <body className="min-h-full flex flex-col bg-[#050a14]">
+    <html lang="es" className={`${geist.variable} antialiased`}>
+      <body className="min-h-screen flex flex-col bg-[#04090f] text-white">
         <Providers>
           <Navbar />
           <main className="flex-1">{children}</main>
